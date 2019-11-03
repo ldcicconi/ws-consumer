@@ -1,6 +1,7 @@
 package wscontractor
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/url"
@@ -14,6 +15,7 @@ var (
 
 type WsContractor struct {
 	wsURL               *url.URL
+	dialer              websocket.Dialer
 	subscriptionMessage []byte
 	messageHandler      func([]byte)
 	reconnectChan       chan bool
@@ -21,24 +23,23 @@ type WsContractor struct {
 	consuming           bool // Or connecting
 }
 
-func NewWsContractor(URL string, subMessage []byte, messageHandlerFunc func([]byte), isSecure bool) *WsContractor {
-	if URL == "" || subMessage == nil || messageHandlerFunc == nil {
+func NewWsContractor(URL url.URL, subMessage []byte, messageHandlerFunc func([]byte), isSecure bool) *WsContractor {
+	if subMessage == nil || messageHandlerFunc == nil {
 		return nil
 	}
-	scheme := "ws"
+	dialer := *websocket.DefaultDialer
 	if isSecure {
-		scheme = "wss"
+		dialer = websocket.Dialer{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
 	}
 	return &WsContractor{
-		wsURL: &url.URL{
-			Scheme: scheme,
-			Host:   URL,
-			Path:   "/",
-		},
+		wsURL:               &URL,
 		subscriptionMessage: subMessage,
 		messageHandler:      messageHandlerFunc,
 		reconnectChan:       make(chan bool), //If the websocket connection is interupted, the consumer closes the connection and signals that it needs to be restarted
 		killChan:            make(chan bool),
+		dialer:              dialer,
 	}
 }
 
@@ -80,16 +81,15 @@ func (ctrctr *WsContractor) Kill() {
 func (ctrctr *WsContractor) connectAndSubscribe() (conn *websocket.Conn, success bool) {
 	// Connect
 	log.Printf("connecting to %s", ctrctr.wsURL.String())
-	ws, _, err := websocket.DefaultDialer.Dial("wss://ws-feed.pro.coinbase.com/", nil)
-	log.Printf("dialed")
+	ws, _, err := ctrctr.dialer.Dial(ctrctr.wsURL.String(), nil)
 	if err != nil {
 		ws.Close()
 		log.Fatal("dial:", err)
 		return nil, false
 	}
 	// Subscribe
-
-	err = ws.WriteMessage(websocket.BinaryMessage, ctrctr.subscriptionMessage)
+	log.Printf("submessage: %s", string(ctrctr.subscriptionMessage))
+	err = ws.WriteMessage(websocket.TextMessage, ctrctr.subscriptionMessage)
 	if err != nil {
 		log.Fatal("subsr:", err)
 		ws.Close()
@@ -101,11 +101,7 @@ func (ctrctr *WsContractor) connectAndSubscribe() (conn *websocket.Conn, success
 func (ctrctr *WsContractor) consumeUntilDisconect(ws *websocket.Conn) {
 	defer ws.Close()
 	for {
-		if ctrctr.consuming == false {
-			return
-		}
 		// Read message
-		fmt.Println("reading message")
 		_, message, err := ws.ReadMessage()
 		// TODO: better error handling
 		if err != nil {
