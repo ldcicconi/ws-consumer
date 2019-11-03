@@ -1,4 +1,4 @@
-module github.com/ldcicconi/ws-contractor
+module ws-contractor
 
 go 1.12
 
