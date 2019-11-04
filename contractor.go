@@ -18,6 +18,8 @@ type WsContractor struct {
 	dialer              websocket.Dialer
 	subscriptionMessage []byte
 	messageHandler      func([]byte)
+	isPipeline          bool
+	dataChan            chan []byte
 	reconnectChan       chan bool
 	killChan            chan bool
 	consuming           bool // Or connecting
@@ -41,6 +43,13 @@ func NewWsContractor(URL url.URL, subMessage []byte, messageHandlerFunc func([]b
 		killChan:            make(chan bool),
 		dialer:              dialer,
 	}
+}
+
+func NewWsContractorAsPipeline(URL url.URL, subMessage []byte, dataChan chan []byte, isSecure bool) *WsContractor {
+	contractor := NewWsContractor(URL, subMessage, nil, isSecure)
+	contractor.dataChan = dataChan
+	contractor.isPipeline = true
+	return contractor
 }
 
 func (ctrctr *WsContractor) Consume() error {
@@ -110,6 +119,10 @@ func (ctrctr *WsContractor) consumeUntilDisconect(ws *websocket.Conn) {
 			return
 		}
 		// Handle message
-		go ctrctr.messageHandler(message)
+		if ctrctr.isPipeline {
+			ctrctr.dataChan <- message
+		} else {
+			go ctrctr.messageHandler(message)
+		}
 	}
 }
