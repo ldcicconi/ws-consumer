@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,6 +21,11 @@ type WsContractor struct {
 	reconnectChan       chan bool
 	killChan            chan bool
 	consuming           bool // Or connecting
+}
+
+type MessageEnvelope struct {
+	Payload          []byte
+	ReceiptTimestamp time.Time
 }
 
 func NewWsContractor(URL url.URL, subMessage []byte, isSecure bool) *WsContractor {
@@ -41,7 +47,7 @@ func NewWsContractor(URL url.URL, subMessage []byte, isSecure bool) *WsContracto
 	}
 }
 
-func (ctrctr *WsContractor) Consume(outputChan chan []byte) error {
+func (ctrctr *WsContractor) Consume(outputChan chan MessageEnvelope) error {
 	if ctrctr.consuming {
 		return AlreadyConsumingError
 	}
@@ -57,7 +63,6 @@ func (ctrctr *WsContractor) Consume(outputChan chan []byte) error {
 				ws, success := ctrctr.connectAndSubscribe()
 				if success {
 					// Consume from the websocket
-					log.Println("success")
 					go ctrctr.consumeUntilDisconect(ws, outputChan)
 				} else {
 					log.Println("failure")
@@ -96,11 +101,12 @@ func (ctrctr *WsContractor) connectAndSubscribe() (conn *websocket.Conn, success
 	return ws, true
 }
 
-func (ctrctr *WsContractor) consumeUntilDisconect(ws *websocket.Conn, outputChan chan []byte) {
+func (ctrctr *WsContractor) consumeUntilDisconect(ws *websocket.Conn, outputChan chan MessageEnvelope) {
 	defer ws.Close()
 	for {
 		// Read message
 		_, message, err := ws.ReadMessage()
+		now := time.Now()
 		// TODO: better error handling
 		if err != nil {
 			log.Println("read:", err)
@@ -108,6 +114,6 @@ func (ctrctr *WsContractor) consumeUntilDisconect(ws *websocket.Conn, outputChan
 			return
 		}
 		// Handle message
-		outputChan <- message
+		outputChan <- MessageEnvelope{Payload: message, ReceiptTimestamp: now}
 	}
 }
